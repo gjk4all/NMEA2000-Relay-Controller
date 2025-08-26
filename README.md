@@ -1,11 +1,11 @@
 # NMEA2000-Switch-Device
 A remote switch operated bij NMEA2000 PGN 127502 - Switch Bank Control messages
 
-The software is written for and tested on a Blue Pill (stm32f103c8t6)
+The software is written for and tested on a Blue Pill (stm32f103c8t6)\
 It is written in STM32CubeIDE (version 1.19)
 
 ## Schematic
-V1.0 [schematic](NMEA2000 Relay Controller V1.0.pdf) added to the repository
+V1.0 [schematic](NMEA2000%20Relay%20Controller%20V1.0.pdf) added to the repository
 
 ## Compliance
 - Reacts on PGN 59904 - ISO Request messages (only for PGN 60928)
@@ -33,7 +33,7 @@ See schematic, relay coils ar pulled to earth with a ULN2803 driver.
 - Max current total: 2.5A
 
 ## Links
-[Canboat.github.com](https://canboat.github.io/canboat/canboat.html)
+[Canboat.github.com](https://canboat.github.io/canboat/canboat.html)\
 [mgenergysystems.eu](https://docs.mgenergysystems.eu/en/application-notes/Tracking-MG-device-on-NMEA2000-CAN-bus#:~:text=Address%20Claim%20procedure%20(ACL),send%20by%20this%20device%20first.)
 
 ## Disclamer
