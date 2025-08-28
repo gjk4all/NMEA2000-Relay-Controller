@@ -4,6 +4,8 @@ A remote switch operated bij NMEA2000 PGN 127502 - Switch Bank Control messages
 The software is written for and tested on a Blue Pill (stm32f103c8t6)\
 It is written in STM32CubeIDE (version 1.19)
 
+For the switching output is use a [12 volt 8 channel relay board from AliExpress](https://nl.aliexpress.com/item/1005007003070916.html)
+
 ## Schematic
 V1.0 [schematic](NMEA2000%20Relay%20Controller%20V1.0.pdf) added to the repository
 
@@ -31,6 +33,8 @@ See schematic, relay coils ar pulled to earth with a ULN2803 driver.
 - Max coil voltage: 12V
 - Max current per channel: 500mA
 - Max current total: 2.5A
+### Safety overrule
+All relays can be activated manually by pulling there control lines to ground with a switch, this can be used as backup for critical circuits (navigation lights etc.)
 
 ## Links
 [Canboat.github.com](https://canboat.github.io/canboat/canboat.html)\
