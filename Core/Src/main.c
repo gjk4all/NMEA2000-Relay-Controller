@@ -192,7 +192,7 @@ int main(void)
 
   // Populate initial N2K network structure
   nmea2kNetwork.senderId = N2K_ID;
-  nmea2kNetwork.identityNumber = ISO_IDENT;
+  nmea2kNetwork.identityNumber = HAL_GetUIDw0() ^ HAL_GetUIDw1() ^ HAL_GetUIDw2();
   nmea2kNetwork.manufacturerCode = MFG_CODE;
   nmea2kNetwork.deviceInstance = DEV_INST;
   nmea2kNetwork.deviceFunction = DEV_FUNCT;
@@ -759,7 +759,7 @@ void Send_Status(void * payload)
 	}
 
 	// Send the NMEA 127501 Binary Switch Bank Status message
-	if (HAL_CAN_AddTxMessage(&hcan, &TxHeader, TxData, &TxMailbox) != HAL_OK) {
+ 	if (HAL_CAN_AddTxMessage(&hcan, &TxHeader, TxData, &TxMailbox) != HAL_OK) {
 		Error_Handler();
 	}
 
