@@ -125,7 +125,7 @@ volatile uint16_t relayStatus;
 uint8_t relayId;
 struct RELAY relays[RELAY_CHANNELS];
 struct NMEA2K_NETWORK nmea2kNetwork;
-struct TIMER_T *timers = NULL;
+struct TIMER_T *timers = NULL, *statusTimer;
 
 // Product Information
 char modelId[] 				= "GJK NMEA2000 Switch Device. (CC) 2025 by G.J.Kruizinga";
@@ -149,7 +149,7 @@ void Handle_ISOTransportMessages(uint32_t N2KPgn, uint8_t senderId, uint8_t *dat
 void Handle_ISOCommandedAddress(uint8_t *data);
 int Compare_NameWeight(uint8_t *data);
 void Set_Relays(uint8_t *data);
-void * Add_Timer(int type, int timeout, void(*callback)(), void * payload);
+struct TIMER_T * Add_Timer(int type, int timeout, void(*callback)(), void * payload);
 void Delete_Timer(struct TIMER_T *timer);
 int Get_RelayBoardId(void);
 void Error_Handler(void);
@@ -237,7 +237,7 @@ int main(void)
 	  Error_Handler();
   }
   // Binary switch status timer
-  if (Add_Timer(TIMER_RELOAD, nmea2kNetwork.statusTime, &Send_Status, NULL) == NULL) {
+  if ((statusTimer = Add_Timer(TIMER_RELOAD, nmea2kNetwork.statusTime, &Send_Status, NULL)) == NULL) {
 	  Error_Handler();
   }
 
@@ -574,7 +574,7 @@ void HAL_CAN_RxFifo1MsgPendingCallback(CAN_HandleTypeDef *hcan)
 	if ((N2KPgn == 127502) && (RxData[0] == relayId)) {
 		// Set the relays and send a new status message
 		Set_Relays(RxData);
-		Send_Status(NULL);
+		statusTimer->countdown = 1;
 	}
 
 	// Check for ISO Address Claim message with our senderId
@@ -688,7 +688,7 @@ void Send_ISOAcknowledgement(uint8_t dest, uint8_t control, uint8_t group, uint3
 void Send_HeartBeat(void * payload) {
 	static int			sequence = 0;
 	CAN_TxHeaderTypeDef	TxHeader;
-	uint32_t			TxMailbox = CAN_TX_MAILBOX0;
+	uint32_t			TxMailbox = CAN_TX_MAILBOX1;
 	uint32_t			N2KId;
 
 	// Initialise the CAN header with the NMEA2K info
@@ -730,12 +730,9 @@ void Send_HeartBeat(void * payload) {
 void Send_Status(void * payload)
 {
 	CAN_TxHeaderTypeDef	TxHeader;
-	uint32_t			TxMailbox = CAN_TX_MAILBOX0;
+	uint32_t			TxMailbox = CAN_TX_MAILBOX1;
 	uint32_t			N2KId;
 	int 				offset, index;
-
-	// Stop the timer
-	HAL_TIM_Base_Stop_IT(&htim3);
 
 	// Initialize the CAN header with the NMEA2K info
 	// Can ID = PRIO(3) - 0 - PGN(17) - Sender ID(8)
@@ -762,9 +759,6 @@ void Send_Status(void * payload)
  	if (HAL_CAN_AddTxMessage(&hcan, &TxHeader, TxData, &TxMailbox) != HAL_OK) {
 		Error_Handler();
 	}
-
-	// Restart/reset the timer
-	HAL_TIM_Base_Start_IT(&htim3);
 }
 
 
@@ -929,7 +923,7 @@ void Set_Relays(uint8_t *data)
 }
 
 
-void * Add_Timer(int type, int timeout, void(*callback)(), void * payload) {
+struct TIMER_T * Add_Timer(int type, int timeout, void(*callback)(), void * payload) {
 	struct TIMER_T *current, *new;
 
 	if ((new = malloc(sizeof(struct TIMER_T))) == NULL)
@@ -1007,6 +1001,7 @@ int Get_RelayBoardId(void) {
   */
 void Error_Handler()
 {
+  volatile int a = 1, b = 7;
   /* USER CODE BEGIN Error_Handler_Debug */
   /* User can add his own implementation to report the HAL error return state */
 
@@ -1014,7 +1009,9 @@ void Error_Handler()
   while (1)
   {
 	  HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Pin);
-	  HAL_Delay(250);
+	  for (int i = 0; i < 2000000; i++) {
+		  a = a * b;
+	  }
   }
   /* USER CODE END Error_Handler_Debug */
 }
