@@ -10,26 +10,26 @@ For the switching output is use a [12 volt 8 channel relay board from AliExpress
 V1.0 [schematic](NMEA2000%20Relay%20Controller%20V1.0.pdf) added to the repository
 
 ## Compliance
-- Reacts on PGN 59904 - ISO Request messages (only for PGN 60928)
+- Reacts on PGN 59904 - ISO Request messages (only for PGN 60928 and PGN 126996)
 - Sends NMEA2000 PGN 60928 - ISO Address Claim messages to join the bus
 - Reacts on NMEA2000 PGN 60928 - ISO Address Claim messages to resolve address conflicts
 - Reacts on NMEA2000 PGN 127502 - Switch Bank Control messages to switch relays
+- Reacts to request for PGN 126996 Product Information
+- Reacts to PGN 60160 ISO Transport Protocol DT (for PGN 65240)
+- Reacts to PGN 60416 ISO Transport Protocol CM (BAM announcement for PGN 65240)
+- Reacts to PGN 65240 ISO Commanded Address
 - Broadcasts NMEA2000 PGN 127501 - Binary Switch Bank Status messages every second with current relay status
+- Broadcasts NMEA2000 PGN 126993 Heartbeat messages
 
 ## Compliance todo (in future release)
 - PGN 59392 ISO Acknowledgment (TX/RX)
 - PGN 59904 ISO Request (RX, for all supported PGN's)
-- PGN 60160 ISO Transport Protocol DT (RX, for PGN 65240)
-- PGN 60416 ISO Transport Protocol CM (RX, for PGN 65240)
-- PGN 65240 ISO Commanded Address (RX)
 - PGN 126464 PGN List (TX)
-- PGN 126993 Heartbeat (TX)
-- PGN 126996 Product Information (TX)
 - PGN 126998 Configuration Information (TX)
 
 ## Electronics
 See schematic, relay coils ar pulled to earth with a ULN2803 driver. 
-- Operating voltage: 12V (Via NMEA2000 bus)
+- Operating voltage: 12V (9-16V through NMEA2000 bus)
 - Max coil voltage: 12V
 - Max current per channel: 500mA
 - Max current total: 2.5A
@@ -39,6 +39,7 @@ All relays can be activated manually by pulling there control lines to ground wi
 ## Links
 [Canboat.github.com](https://canboat.github.io/canboat/canboat.html)\
 [mgenergysystems.eu](https://docs.mgenergysystems.eu/en/application-notes/Tracking-MG-device-on-NMEA2000-CAN-bus#:~:text=Address%20Claim%20procedure%20(ACL),send%20by%20this%20device%20first.)
+[embeddedflakes.com](https://embeddedflakes.com/network-management-in-sae-j1939/)
 
 ## Disclamer
 I try my best to make the device as compliance to NMEA2000 as possible bot don't have the means to certify it with NMEA nor to test it on a real NMEA2000 network. Use of this device and the software is at your own risk! (Don't say i didn't warn you).
