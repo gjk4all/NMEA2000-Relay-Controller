@@ -4,6 +4,8 @@
   * @file           : main.c
   * @brief          : Main program body
   ******************************************************************************
+  * NMEA2000 Relay Board Controller
+  *
   * @attention
   *
   * Copyright (c) 2025 STMicroelectronics.
@@ -22,6 +24,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 
+#include <stdio.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -34,29 +37,22 @@ struct RELAY {
 
 // NMEA2K network operational NAME parameters
 struct NMEA2K_NETWORK {
-	uint8_t		senderId;
-	uint32_t	identityNumber;
-	uint16_t	manufacturerCode;
-	uint8_t		deviceInstance;
-	uint8_t		deviceFunction;
-	uint8_t		deviceClass;
-	uint8_t		systemInstance;
-	uint8_t		industryGroup;
-	uint8_t		arbetraryAddress;
-	uint8_t		linkState;
-	uint8_t		linkRetries;
-	uint16_t	heartbeatTime;
-	uint16_t	statusTime;
+	uint8_t			senderId;
+	uint8_t			linkState;
+	uint16_t		heartbeatTime;
+	uint8_t			*nameData;
+	uint8_t			linkRetries;
+	uint16_t		statusTime;
 };
 
 struct ISO_TRANSPORT_MESSAGE {
-	uint8_t		senderId;
-	uint8_t		isoCommand;
-	uint8_t		packetsExpected;
-	uint8_t		packetsReceived;
-	uint16_t	messageSize;
-	uint32_t	pgn;
-	uint8_t		*data;
+	uint8_t			senderId;
+	uint8_t			isoCommand;
+	uint8_t			packetsExpected;
+	uint8_t			packetsReceived;
+	uint16_t		messageSize;
+	uint32_t		pgn;
+	uint8_t			*data;
 	struct ISO_TRANSPORT_MESSAGE *prev;
 	struct ISO_TRANSPORT_MESSAGE *next;
 };
@@ -69,6 +65,13 @@ struct TIMER_T {
 	void 			*payload;
 	struct 			TIMER_T *prev;
 	struct 			TIMER_T *next;
+};
+
+// Queue type for jobs to be executed
+struct JOB_QUEUE_T {
+	void 			(*callback)(void *);
+	void 			*payload;
+	struct JOB_QUEUE_T	*next;
 };
 
 /* USER CODE END PTD */
@@ -105,13 +108,14 @@ struct TIMER_T {
 #define TIMER_ONESHOT		1
 #define TIMER_RELOAD		2
 
+#define MODEL_ID			"GJK NMEA2000 Relay Controller"
+#define SOFTWARE_VERSION	"V 1.0"
+#define HARDWARE_VERSION	"V 1.0"
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
-
-// Compare macro
-#define compare(a, b) 		(((a) < (b)) ? -1 : (((a) > (b)) ? 1 : 0))
 
 /* USER CODE END PM */
 
@@ -123,15 +127,21 @@ TIM_HandleTypeDef htim3;
 /* USER CODE BEGIN PV */
 volatile uint16_t relayStatus;
 uint8_t relayId;
-struct RELAY relays[RELAY_CHANNELS];
+struct RELAY relays[RELAY_CHANNELS] = {
+		{relay0_GPIO_Port, relay0_Pin},
+		{relay1_GPIO_Port, relay1_Pin},
+		{relay2_GPIO_Port, relay2_Pin},
+		{relay3_GPIO_Port, relay3_Pin},
+		{relay4_GPIO_Port, relay4_Pin},
+		{relay5_GPIO_Port, relay5_Pin},
+		{relay6_GPIO_Port, relay6_Pin},
+		{relay7_GPIO_Port, relay7_Pin}
+};
 struct NMEA2K_NETWORK nmea2kNetwork;
 struct TIMER_T *timers = NULL, *statusTimer;
+struct JOB_QUEUE_T *jobs = NULL;
 
-// Product Information
-char modelId[] 				= "GJK NMEA2000 Switch Device. (CC) 2025 by G.J.Kruizinga";
-char softwareVersionCode[] 	= "Version 1.0";
-char modelVersion[] 		= "Version 1.0";
-char modelSerialCode[] 		= "114351";						/* Increase serial number */
+char productInformation[128];
 
 /* USER CODE END PV */
 
@@ -145,12 +155,16 @@ void Send_ISOAddressClaim(void);
 void Send_ISOAcknowledgement(uint8_t dest, uint8_t control, uint8_t group, uint32_t pgn);
 void Send_HeartBeat(void * payload);
 void Send_Status(void * payload);
+void Send_ProductInformation(void * payload);
+int Send_FFMessage(CAN_TxHeaderTypeDef *TxHeader, uint8_t *data, int seqNo, int len);
 void Handle_ISOTransportMessages(uint32_t N2KPgn, uint8_t senderId, uint8_t *data);
 void Handle_ISOCommandedAddress(uint8_t *data);
 int Compare_NameWeight(uint8_t *data);
 void Set_Relays(uint8_t *data);
 struct TIMER_T * Add_Timer(int type, int timeout, void(*callback)(), void * payload);
 void Delete_Timer(struct TIMER_T *timer);
+struct JOB_QUEUE_T * Add_Job(void(*callback)(), void * payload);
+void Delete_Job(struct JOB_QUEUE_T *job);
 int Get_RelayBoardId(void);
 void Error_Handler(void);
 /* USER CODE END PFP */
@@ -167,43 +181,36 @@ void Error_Handler(void);
 int main(void)
 {
 
-  /* USER CODE BEGIN 1 */
+	/* USER CODE BEGIN 1 */
 
-  // Clear all relays
-  relayStatus = 0;
+	// Clear all relays
+	relayStatus = 0;
 
-  // Populate port definition array
-  relays[0].gpio = relay0_GPIO_Port;
-  relays[0].pin  = relay0_Pin;
-  relays[1].gpio = relay1_GPIO_Port;
-  relays[1].pin  = relay1_Pin;
-  relays[2].gpio = relay2_GPIO_Port;
-  relays[2].pin  = relay2_Pin;
-  relays[3].gpio = relay3_GPIO_Port;
-  relays[3].pin  = relay3_Pin;
-  relays[4].gpio = relay4_GPIO_Port;
-  relays[4].pin  = relay4_Pin;
-  relays[5].gpio = relay5_GPIO_Port;
-  relays[5].pin  = relay5_Pin;
-  relays[6].gpio = relay6_GPIO_Port;
-  relays[6].pin  = relay6_Pin;
-  relays[7].gpio = relay7_GPIO_Port;
-  relays[7].pin  = relay7_Pin;
+	// Initialize Product Information record
+	for (int i = 0; i < 128; i++)
+		productInformation[i] = 0xFF;
 
-  // Populate initial N2K network structure
-  nmea2kNetwork.senderId = N2K_ID;
-  nmea2kNetwork.identityNumber = HAL_GetUIDw0() ^ HAL_GetUIDw1() ^ HAL_GetUIDw2();
-  nmea2kNetwork.manufacturerCode = MFG_CODE;
-  nmea2kNetwork.deviceInstance = DEV_INST;
-  nmea2kNetwork.deviceFunction = DEV_FUNCT;
-  nmea2kNetwork.deviceClass = DEV_CLASS;
-  nmea2kNetwork.systemInstance = SYS_INST;
-  nmea2kNetwork.industryGroup = IND_GROUP;
-  nmea2kNetwork.arbetraryAddress = ARB_ADDRESS;
-  nmea2kNetwork.linkState = LINK_STATE_IDLE;
-  nmea2kNetwork.linkRetries = 0;
-  nmea2kNetwork.heartbeatTime = ISO_HEARTBEAT;
-  nmea2kNetwork.statusTime = STATUS_TIMER;
+	sprintf(productInformation, "%s", MODEL_ID);
+	sprintf(productInformation + 32, "%s", SOFTWARE_VERSION);
+	sprintf(productInformation + 64, "%s", HARDWARE_VERSION);
+	sprintf(productInformation + 96, "%lu", (HAL_GetUIDw0() ^ HAL_GetUIDw1() ^ HAL_GetUIDw2()));
+
+	// Initialise the data array with the ISO NAME info
+	uint8_t nameData[8];
+
+	*(uint32_t *)nameData = (MFG_CODE << 21) | ((HAL_GetUIDw0() ^ HAL_GetUIDw1() ^ HAL_GetUIDw2()) & 0x1FFFFF);
+	nameData[4] = DEV_INST;
+	nameData[5] = DEV_FUNCT;
+	nameData[6] = (DEV_CLASS << 1) | 1;
+	nameData[7] = ((ARB_ADDRESS == 0)?0:0x80) | ((IND_GROUP << 4) & 0x70) | ((SYS_INST) & 0x0F);
+
+	// Populate initial N2K network structure
+	nmea2kNetwork.senderId = N2K_ID;
+	nmea2kNetwork.linkState = LINK_STATE_IDLE;
+	nmea2kNetwork.heartbeatTime = ISO_HEARTBEAT;
+	nmea2kNetwork.nameData = nameData;
+	nmea2kNetwork.linkRetries = 0;
+	nmea2kNetwork.statusTime = STATUS_TIMER;
 
   /* USER CODE END 1 */
 
@@ -280,6 +287,15 @@ int main(void)
 			  HAL_TIM_Base_Start_IT(&htim3);
 		  }
 	  }
+
+		// If the link is up, do the switch polling
+		if (nmea2kNetwork.linkState == LINK_STATE_ACTIVE) {
+			// Run job queue
+			while (jobs != NULL) {
+				(jobs->callback)(jobs->payload);
+				Delete_Job(jobs);
+			}
+	  }
   }
   /* USER CODE END 3 */
 }
@@ -332,7 +348,7 @@ static void MX_CAN_Init(void)
 {
 
   /* USER CODE BEGIN CAN_Init 0 */
-  CAN_FilterTypeDef  sFilterN2K126993, sFilterN2K127502, sFilterN2K060928;
+  CAN_FilterTypeDef   sFilterN2K127502, sFilterN2K060928;
 
   /* USER CODE END CAN_Init 0 */
 
@@ -348,7 +364,7 @@ static void MX_CAN_Init(void)
   hcan.Init.TimeTriggeredMode = DISABLE;
   hcan.Init.AutoBusOff = DISABLE;
   hcan.Init.AutoWakeUp = DISABLE;
-  hcan.Init.AutoRetransmission = DISABLE;
+  hcan.Init.AutoRetransmission = ENABLE;
   hcan.Init.ReceiveFifoLocked = DISABLE;
   hcan.Init.TransmitFifoPriority = DISABLE;
   if (HAL_CAN_Init(&hcan) != HAL_OK)
@@ -357,22 +373,7 @@ static void MX_CAN_Init(void)
   }
   /* USER CODE BEGIN CAN_Init 2 */
   // Filter for Switch Bank Control messages
-  uint32_t can_id = 126993 << 8;
-
-  sFilterN2K126993.FilterBank = 1;
-  sFilterN2K126993.FilterMode = CAN_FILTERMODE_IDMASK;
-  sFilterN2K126993.FilterScale = CAN_FILTERSCALE_32BIT;
-  sFilterN2K126993.FilterIdHigh = (can_id >> 13) & 0xFFFF;
-  sFilterN2K126993.FilterIdLow = ((can_id << 3) & 0xFFF8) | 4;
-  sFilterN2K126993.FilterMaskIdHigh = 0x0FFF;
-  sFilterN2K126993.FilterMaskIdLow = 0xC004;
-  sFilterN2K126993.FilterFIFOAssignment = CAN_FILTER_FIFO1;
-  sFilterN2K126993.FilterActivation = CAN_FILTER_ENABLE;
-
-  HAL_CAN_ConfigFilter(&hcan, &sFilterN2K126993);
-
-  // Filter for ISO messages
-  can_id = 127502 << 8;
+  uint32_t can_id = 127502 << 8;
 
   sFilterN2K127502.FilterBank = 1;
   sFilterN2K127502.FilterMode = CAN_FILTERMODE_IDMASK;
@@ -389,7 +390,7 @@ static void MX_CAN_Init(void)
   // Filter for ISO messages
   can_id = 0x0E800 << 8;
 
-  sFilterN2K060928.FilterBank = 0;
+  sFilterN2K060928.FilterBank = 2;
   sFilterN2K060928.FilterMode = CAN_FILTERMODE_IDMASK;
   sFilterN2K060928.FilterScale = CAN_FILTERSCALE_32BIT;
   sFilterN2K060928.FilterIdHigh = (can_id >> 13) & 0xFFFF;
@@ -528,7 +529,8 @@ void HAL_TIM_PeriodElapsedCallback (TIM_HandleTypeDef *htim)
 			current = current->next;
 		}
 		else {
- 			(current->callback)(current->payload);
+			// Submit timer job to the job queue
+ 			Add_Job(current->callback, current->payload);
 
 			if (current->type == TIMER_RELOAD) {
 				current->countdown = current->timeout;
@@ -588,27 +590,30 @@ void HAL_CAN_RxFifo1MsgPendingCallback(CAN_HandleTypeDef *hcan)
 		// If our address is already active, check a couple of things
 		if (nmea2kNetwork.linkState == LINK_STATE_ACTIVE) {
 			// If the other contender can't change his senderID or has a higher NAME score, we change our senderID
-			if (!(RxData[7] & 0x01) || (Compare_NameWeight(RxData) == 1)) {
+			if (Compare_NameWeight(RxData)) {
+				Send_ISOAddressClaim();
+			}
+			else {
 				nmea2kNetwork.linkState = LINK_STATE_IDLE;
 				nmea2kNetwork.linkRetries += 1;
 				nmea2kNetwork.senderId += nmea2kNetwork.linkRetries;
-			}
-			else {
-				// If we have the same NAME score, update our deviceInstance value
-				if (Compare_NameWeight(RxData) == 0)
-					nmea2kNetwork.deviceInstance += 1;
-				// We reclaim the address because we have a higher NAME score
-				Send_ISOAddressClaim();
 			}
 		}
 	}
 
 	// Check for ISO Request to our senderId or broadcast id
 	if (((N2KPgn & 0x1FF00) == 0x0EA00) && (((N2KPgn & 0xFF) == nmea2kNetwork.senderId) || ((N2KPgn & 0xFF) == 0xFF))) {
-		uint32_t requestPGN = (RxData[0] << 16) | (RxData[1] << 8) | RxData[2];
+		uint32_t requestPGN = *(uint32_t *)RxData & 0x00FFFFFF;
+		// Check for a ISO Address Claim request
+
 		// Check for a ISO Address Claim request
 		if (requestPGN == 0x00EE00) {
-			Send_ISOAddressClaim();
+			Add_Job(&Send_ISOAddressClaim, NULL);
+		}
+
+		// Check for a Product Information request
+		if (requestPGN == 0x01F014) {
+			Add_Job(&Send_ProductInformation, NULL);
 		}
 	}
 
@@ -642,24 +647,26 @@ void Send_ISOAddressClaim() {
 	TxHeader.DLC = 8;
 	TxHeader.TransmitGlobalTime = DISABLE;
 
-	// Initialise the data array with the ISO NAME info
-	uint8_t TxData[8];
-
-	*((uint32_t *)TxData) = (nmea2kNetwork.identityNumber << 11) | (nmea2kNetwork.manufacturerCode & 0x7F);
-	TxData[4] = nmea2kNetwork.deviceInstance;
-	TxData[5] =	nmea2kNetwork.deviceFunction;
-	TxData[6] = nmea2kNetwork.deviceClass & 0x7F;
-	TxData[7] = ((nmea2kNetwork.systemInstance << 4) & 0xF0) | ((nmea2kNetwork.industryGroup << 1) & 0x0E) |
-				((nmea2kNetwork.arbetraryAddress)?1:0);
-
 	// Send the NMEA 60928 ISO Address Claim message
-	if (HAL_CAN_AddTxMessage(&hcan, &TxHeader, TxData, &TxMailbox) != HAL_OK) {
+	if (HAL_CAN_AddTxMessage(&hcan, &TxHeader, nmea2kNetwork.nameData, &TxMailbox) != HAL_OK) {
 		Error_Handler();
 	}
 
 }
 
 
+/******************************************************************************
+ * Send_ISOAcknowledgement
+ *
+ * Send a ISO Acknowledgement message
+ *
+ * Parameters:
+ * - dest		Destination address
+ * - control	Acknowledgement type
+ * - group		Group ID
+ * - pgn		PGN to acknowledge
+ *
+ *****************************************************************************/
 void Send_ISOAcknowledgement(uint8_t dest, uint8_t control, uint8_t group, uint32_t pgn) {
 	CAN_TxHeaderTypeDef	TxHeader;
 	uint32_t			TxMailbox = CAN_TX_MAILBOX0;
@@ -685,6 +692,12 @@ void Send_ISOAcknowledgement(uint8_t dest, uint8_t control, uint8_t group, uint3
 }
 
 
+/******************************************************************************
+ * Send_HeartBeat
+ *
+ * Send a NMEA2000 Heartbeat message to the network
+ *
+ *****************************************************************************/
 void Send_HeartBeat(void * payload) {
 	static int			sequence = 0;
 	CAN_TxHeaderTypeDef	TxHeader;
@@ -744,14 +757,17 @@ void Send_Status(void * payload)
 	TxHeader.TransmitGlobalTime = DISABLE;
 
 	// Initialize the status array with the relay instance id
-	uint8_t TxData[] = {relayId, 0, 0, 0, 0, 0, 0, 0};
+	uint8_t TxData[] = {relayId, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 
 	// Fill the status array according to PGN 127501
 	for (int i = 0; i < RELAY_CHANNELS; i++) {
-		offset = 6 - (2 * (i % 4));
+		offset = 2 * (i % 4);
 		index = 1 + (i / 4);
 		if ((relayStatus & (1 << i)) != 0) {
-			TxData[index] |= (1 << offset);
+			TxData[index] &= ~(0b10 << offset);
+		}
+		else {
+			TxData[index] &= ~(0b11 << offset);
 		}
 	}
 
@@ -759,6 +775,86 @@ void Send_Status(void * payload)
  	if (HAL_CAN_AddTxMessage(&hcan, &TxHeader, TxData, &TxMailbox) != HAL_OK) {
 		Error_Handler();
 	}
+}
+
+
+void Send_ProductInformation(void * payload) {
+	CAN_TxHeaderTypeDef	TxHeader;
+	uint32_t			N2KId;
+	uint8_t				*data;
+
+	// Initialise the CAN header with the NMEA2K info
+	// Can ID = PRIO(3) - 0 - PGN(17) - Sender ID(8)
+	N2KId = (6 << 26) | (0x1F014 << 8) | nmea2kNetwork.senderId;
+	TxHeader.ExtId = N2KId;
+	TxHeader.IDE = CAN_ID_EXT;
+	TxHeader.RTR = CAN_RTR_DATA;
+	TxHeader.DLC = 8;
+	TxHeader.TransmitGlobalTime = DISABLE;
+
+	// Allocate data structure
+	if ((data = malloc(134 * sizeof(uint8_t))) == NULL) {
+		Error_Handler();
+	}
+
+	// Populate data structure
+	*(uint16_t *)data = 3000;					// NMEA2000 v3.000
+	*(uint16_t *)(data + 2) = 101;				// Model number 1.01
+	memcpy(data + 4, productInformation, 128);	// 128 bytes of product information
+	*(data + 132) = 0xFF;						// No official NMEA2000 certification
+	*(data + 133) = 4;							// Guaranteed max load = 4 * 50mA = 200mA
+
+	// Send as Fast Frame message
+	Send_FFMessage(&TxHeader, data, 0, 134);
+	free(data);
+}
+
+
+int Send_FFMessage(CAN_TxHeaderTypeDef *TxHeader, uint8_t *data, int seqNo, int len) {
+	uint32_t TxMailbox = CAN_TX_MAILBOX0;
+	int offset = 0, frameCounter = 0;
+	uint8_t TxData[8];
+
+	// Check validity of len parameter
+	if ((len > 223) || (len < 9))
+		return frameCounter;
+
+	// Frame length is always 8 data bytes
+	TxHeader->DLC = 8;
+
+	// Fill TxData for first package
+	TxData[0] = (seqNo << 5) | (frameCounter++ & 0x1F);
+	TxData[1] = len & 0xFF;
+	memcpy(&TxData[2], data, ((len - offset) < 6)?(len - offset):6);
+	offset += ((len - offset) < 6)?(len - offset):6;
+
+	// Send the NMEA2000 FF Frame
+	if (HAL_CAN_AddTxMessage(&hcan, TxHeader, TxData, &TxMailbox) != HAL_OK) {
+		Error_Handler();
+	}
+
+	while (offset < len) {
+		// Delay for 1 ms to prevent buffer flooding (non critical)
+		HAL_Delay(1);
+
+		// Fill TxData for additional packages
+		TxData[0] = (seqNo << 5) | (frameCounter++ & 0x1F);
+		memcpy(&TxData[1], data + offset, ((len - offset) < 7)?(len - offset):7);
+		offset += ((len - offset) < 6)?(len - offset):6;
+
+		// Pad till 8 bytes
+		for (int i = (len - offset); i < 8; i++) {
+			TxData[i] = 0xFF;
+		}
+
+		// Send the NMEA2000 FF Frame
+		if (HAL_CAN_AddTxMessage(&hcan, TxHeader, TxData, &TxMailbox) != HAL_OK) {
+			Error_Handler();
+		}
+	}
+
+	// Return number of frames send
+	return frameCounter;
 }
 
 
@@ -842,9 +938,10 @@ void Handle_ISOTransportMessages(uint32_t N2KPgn, uint8_t senderId, uint8_t *dat
 
 
 void Handle_ISOCommandedAddress(uint8_t *data) {
-	if (Compare_NameWeight(data) == 0) {
+	if (*(uint64_t *)nmea2kNetwork.nameData == *(uint64_t *)data) {
 		nmea2kNetwork.senderId = data[8];
-		nmea2kNetwork.arbetraryAddress = 0;
+		nmea2kNetwork.nameData[7] &= ~(1 << 7);
+		nmea2kNetwork.linkState = LINK_STATE_IDLE;
 	}
 }
 
@@ -866,24 +963,7 @@ void Handle_ISOCommandedAddress(uint8_t *data) {
  *
  *****************************************************************************/
 int Compare_NameWeight(uint8_t *data) {
-	int ret;
-
-	// compare is defined as a macro
-	if ((ret = compare(data[0], ((nmea2kNetwork.identityNumber >> 13) & 0xFF))) != 0)
-		return ret;
-	if ((ret = compare(data[1], ((nmea2kNetwork.identityNumber >> 5) & 0xFF))) != 0)
-		return ret;
-	if ((ret = compare(data[2], (((nmea2kNetwork.identityNumber << 3) & 0xF8) | ((nmea2kNetwork.manufacturerCode >> 8) & 0x07)))) != 0)
-		return ret;
-	if ((ret = compare(data[3], (nmea2kNetwork.manufacturerCode & 0xFF))) != 0)
-		return ret;
-	if ((ret = compare(data[4], nmea2kNetwork.deviceInstance)) != 0)
-		return ret;
-	if ((ret = compare(data[5], nmea2kNetwork.deviceFunction)) != 0)
-		return ret;
-	if ((ret = compare(data[6], (nmea2kNetwork.deviceClass & 0x7F))) != 0)
-		return ret;
-	return compare(data[7], (((nmea2kNetwork.systemInstance << 4) & 0xF0) | ((nmea2kNetwork.industryGroup << 1) & 0x0E) | 0x01));
+	return (*(uint64_t *)nmea2kNetwork.nameData <= *(uint64_t *)data);
 }
 
 
@@ -903,7 +983,7 @@ void Set_Relays(uint8_t *data)
 	// Count for the number of relays on the controller
 	for (int i = 0; i < RELAY_CHANNELS; i++) {
 		// Determine index and offset for the parameters in the data structure
-		offset = 6 - (2 * (i % 4));
+		offset = 2 * (i % 4);
 		index = 1 + (i / 4);
 
 		switch ((data[index] >> offset) & 0x03) {
@@ -933,6 +1013,7 @@ struct TIMER_T * Add_Timer(int type, int timeout, void(*callback)(), void * payl
 	new->timeout = timeout;
 	new->countdown = timeout;
 	new->callback = callback;
+	new->payload = payload;
 
 	if (timers == NULL) {
 		new->prev = NULL;
@@ -962,6 +1043,45 @@ void Delete_Timer(struct TIMER_T *timer) {
 		timer->next->prev = timer->prev;
 
 	free(timer);
+}
+
+
+struct JOB_QUEUE_T * Add_Job(void(*callback)(), void * payload) {
+	struct JOB_QUEUE_T *current, *new;
+
+	if ((new = malloc(sizeof(struct JOB_QUEUE_T))) == NULL)
+		return NULL;
+
+	new->callback = callback;
+	new->payload = payload;
+	new->next = NULL;
+
+	if (jobs == NULL)
+		jobs = new;
+	else {
+		current = jobs;
+		while (current->next != NULL)
+			current = current->next;
+		current->next = new;
+	}
+
+	return new;
+}
+
+void Delete_Job(struct JOB_QUEUE_T *job) {
+	struct JOB_QUEUE_T *current;
+
+	if (jobs == NULL) {}	// Do nothing
+	else if (jobs == job)
+		jobs = job->next;
+	else {
+		current = jobs;
+		while (current->next != job)
+			current = current->next;
+		current->next = job->next;
+	}
+
+	free(job);
 }
 
 
