@@ -57,6 +57,12 @@ struct ISO_TRANSPORT_MESSAGE {
 	struct ISO_TRANSPORT_MESSAGE *next;
 };
 
+struct CAN_MSG_T {
+	uint32_t		pgn;
+	uint8_t			senderId;
+	uint8_t			data[8];
+};
+
 struct TIMER_T {
 	int 			type;
 	int				timeout;
@@ -87,8 +93,7 @@ struct JOB_QUEUE_T {
 #define RELAY_CHANNELS		8		/* Number of relays on this board */
 
 // Initial ISO NAME parameters
-#define ISO_IDENT			0x1BEAF	/* AKA serial number used in address claim */
-#define MFG_CODE			666		/* Manufacturer code (0-2048) 666 for homemade */
+#define MFG_CODE			2046	/* Manufacturer code (0-2047) 2046 for homemade */
 #define DEV_INST			0		/* Device instance */
 #define DEV_FUNCT			130		/* Binary Event Monitor */
 #define DEV_CLASS			30		/* Electrical Distribution */
@@ -96,8 +101,8 @@ struct JOB_QUEUE_T {
 #define IND_GROUP			4		/* Industry group = 4 (Marine Industry) */
 #define ARB_ADDRESS			1		/* Arbitrary address capable */
 #define ISO_MAX_RETRIES		8		/* Maximum number of address claim retries */
-#define ISO_HEARTBEAT		2000	/* Heartbeat interval = 20 sec (2000 * 10ms) */
-#define STATUS_TIMER		200		/* Switch status interval = 2 sec (200 * 10ms) */
+#define ISO_HEARTBEAT		2000	/* Heartbeat default interval = 20 sec (2000 * 10ms) */
+#define STATUS_TIMER		200		/* Switch status default interval = 2 sec (200 * 10ms) */
 
 // NMEA2K Link States
 #define LINK_STATE_IDLE		0
@@ -141,6 +146,12 @@ struct NMEA2K_NETWORK nmea2kNetwork;
 struct TIMER_T *timers = NULL, *statusTimer;
 struct JOB_QUEUE_T *jobs = NULL;
 
+// List of transmitted and received PGN's capable by this device
+uint32_t txList[] = {59392, 60928, 126996, 127501, 126993, 126464, 0};
+uint32_t rxList[] = {59904, 60928, 60160, 60416, 65240, 127502, 0};
+uint32_t * pgnList[] = {txList, rxList};
+
+// Static strings for PGN 126996
 char productInformation[128];
 
 /* USER CODE END PV */
@@ -156,8 +167,9 @@ void Send_ISOAcknowledgement(uint8_t dest, uint8_t control, uint8_t group, uint3
 void Send_HeartBeat(void * payload);
 void Send_Status(void * payload);
 void Send_ProductInformation(void * payload);
+void Send_PGNList(void * payload);
 int Send_FFMessage(CAN_TxHeaderTypeDef *TxHeader, uint8_t *data, int seqNo, int len);
-void Handle_ISOTransportMessages(uint32_t N2KPgn, uint8_t senderId, uint8_t *data);
+void Handle_ISOTransportMessages(void *payload);
 void Handle_ISOCommandedAddress(uint8_t *data);
 int Compare_NameWeight(uint8_t *data);
 void Set_Relays(uint8_t *data);
@@ -601,25 +613,49 @@ void HAL_CAN_RxFifo1MsgPendingCallback(CAN_HandleTypeDef *hcan)
 		}
 	}
 
+	struct CAN_MSG_T *msg;
+
 	// Check for ISO Request to our senderId or broadcast id
 	if (((N2KPgn & 0x1FF00) == 0x0EA00) && (((N2KPgn & 0xFF) == nmea2kNetwork.senderId) || ((N2KPgn & 0xFF) == 0xFF))) {
-		uint32_t requestPGN = *(uint32_t *)RxData & 0x00FFFFFF;
-		// Check for a ISO Address Claim request
+		if ((msg = malloc(sizeof(struct CAN_MSG_T))) == NULL) {
+			Error_Handler();
+		}
+
+		msg->pgn = *(uint32_t *)RxData & 0x00FFFFFF;
+		msg->senderId = senderId;
 
 		// Check for a ISO Address Claim request
-		if (requestPGN == 0x00EE00) {
-			Add_Job(&Send_ISOAddressClaim, NULL);
+		if (msg->pgn == 0x00EE00) {
+			Add_Job(&Send_ISOAddressClaim, msg);
 		}
 
 		// Check for a Product Information request
-		if (requestPGN == 0x01F014) {
-			Add_Job(&Send_ProductInformation, NULL);
+		if (msg->pgn == 0x01F014) {
+			Add_Job(&Send_ProductInformation, msg);
+		}
+
+		// Check for a PGN List request
+		if (msg->pgn == 0x01EE00) {
+			Add_Job(&Send_PGNList, msg);
+		}
+
+		// Check for a Binary Switch Bank Status request
+		if (msg->pgn == 0x01F20D) {
+			Add_Job(&Send_Status, msg);
 		}
 	}
 
 	// Check for ISO Transport Protocol messages
 	if (((N2KPgn & 0x1FF00) == 0x0EC00) || ((N2KPgn & 0x1FF00) == 0x0EB00)) {
-		Handle_ISOTransportMessages(N2KPgn, senderId, RxData);
+		if ((msg = malloc(sizeof(struct CAN_MSG_T))) == NULL) {
+			Error_Handler();
+		}
+
+		msg->pgn = N2KPgn;
+		msg->senderId = senderId;
+		memcpy(msg->data, RxData, RxHeader.DLC);
+
+		Add_Job(&Handle_ISOTransportMessages, msg);
 	}
 
 	// RX control LED
@@ -729,6 +765,7 @@ void Send_HeartBeat(void * payload) {
 		Error_Handler();
 	}
 
+	free(payload);
 }
 
 
@@ -775,6 +812,8 @@ void Send_Status(void * payload)
  	if (HAL_CAN_AddTxMessage(&hcan, &TxHeader, TxData, &TxMailbox) != HAL_OK) {
 		Error_Handler();
 	}
+
+	free(payload);
 }
 
 
@@ -806,7 +845,46 @@ void Send_ProductInformation(void * payload) {
 
 	// Send as Fast Frame message
 	Send_FFMessage(&TxHeader, data, 0, 134);
+
 	free(data);
+	free(payload);
+}
+
+
+void Send_PGNList(void * payload) {
+	CAN_TxHeaderTypeDef	TxHeader;
+	uint32_t			N2KId;
+	uint8_t				*data;
+	int 				length;
+
+	// Initialise the CAN header with the NMEA2K info
+	// Can ID = PRIO(3) - 0 - PGN(17) - Sender ID(8)
+	N2KId = (6 << 26) | (0x1EE00 << 8) | nmea2kNetwork.senderId;
+	TxHeader.ExtId = N2KId;
+	TxHeader.IDE = CAN_ID_EXT;
+	TxHeader.RTR = CAN_RTR_DATA;
+	TxHeader.DLC = 8;
+	TxHeader.TransmitGlobalTime = DISABLE;
+
+	for (int i = 0; i < 2; i++) {
+		for (length = 0; pgnList[i][length] != 0; length++);
+
+		// Allocate data structure
+		if ((data = malloc(1 + (length * 3))) == NULL) {
+			Error_Handler();
+		}
+
+		// Populate data structure
+		data[0] = (uint8_t)i;
+		for (int j = 0; j < length; j++) {
+			memcpy(data + 1 + (j * 3), &pgnList[i][j], 3);
+		}
+
+		Send_FFMessage(&TxHeader, data, 0, 1 + (length * 3));
+		free(data);
+	}
+
+	free(payload);
 }
 
 
@@ -826,6 +904,12 @@ int Send_FFMessage(CAN_TxHeaderTypeDef *TxHeader, uint8_t *data, int seqNo, int 
 	TxData[0] = (seqNo << 5) | (frameCounter++ & 0x1F);
 	TxData[1] = len & 0xFF;
 	memcpy(&TxData[2], data, ((len - offset) < 6)?(len - offset):6);
+
+	// Pad till 8 bytes
+	for (int i = (len - offset) + 1; i < 8; i++) {
+		TxData[i] = 0xFF;
+	}
+
 	offset += ((len - offset) < 6)?(len - offset):6;
 
 	// Send the NMEA2000 FF Frame
@@ -835,17 +919,18 @@ int Send_FFMessage(CAN_TxHeaderTypeDef *TxHeader, uint8_t *data, int seqNo, int 
 
 	while (offset < len) {
 		// Delay for 1 ms to prevent buffer flooding (non critical)
-		HAL_Delay(1);
+		HAL_Delay(10);
 
 		// Fill TxData for additional packages
 		TxData[0] = (seqNo << 5) | (frameCounter++ & 0x1F);
 		memcpy(&TxData[1], data + offset, ((len - offset) < 7)?(len - offset):7);
-		offset += ((len - offset) < 6)?(len - offset):6;
 
 		// Pad till 8 bytes
-		for (int i = (len - offset); i < 8; i++) {
+		for (int i = (len - offset) + 1; i < 8; i++) {
 			TxData[i] = 0xFF;
 		}
+
+		offset += ((len - offset) < 7)?(len - offset):7;
 
 		// Send the NMEA2000 FF Frame
 		if (HAL_CAN_AddTxMessage(&hcan, TxHeader, TxData, &TxMailbox) != HAL_OK) {
@@ -858,13 +943,14 @@ int Send_FFMessage(CAN_TxHeaderTypeDef *TxHeader, uint8_t *data, int seqNo, int 
 }
 
 
-void Handle_ISOTransportMessages(uint32_t N2KPgn, uint8_t senderId, uint8_t *data) {
+void Handle_ISOTransportMessages(void *payload) {
+	struct CAN_MSG_T *msg = payload;
 	static struct ISO_TRANSPORT_MESSAGE *msgList = NULL;
 	struct ISO_TRANSPORT_MESSAGE *currentMsg, *newMsg;
 	int offset, byteCount;
 
 	// BAM announcement
-	if (((N2KPgn & 0x1FF00) == 0x0EC00) && (data[0] == 0x20)) {
+	if (((msg->pgn & 0x1FF00) == 0x0EC00) && (msg->data[0] == 0x20)) {
 		// Find the last message to insert after
 		if ((currentMsg = msgList) != NULL) {
 			while (currentMsg->next != NULL)
@@ -877,12 +963,12 @@ void Handle_ISOTransportMessages(uint32_t N2KPgn, uint8_t senderId, uint8_t *dat
 		}
 
 		// Fill the structure
-		newMsg->senderId = senderId;
-		newMsg->isoCommand = data[0];
-		newMsg->packetsExpected = data[3];
+		newMsg->senderId = msg->senderId;
+		newMsg->isoCommand = msg->data[0];
+		newMsg->packetsExpected = msg->data[3];
 		newMsg->packetsReceived = 0;
-		newMsg->messageSize = (uint16_t)data[1];
-		newMsg->pgn = (((uint32_t)data[4]) >> 8);
+		newMsg->messageSize = (uint16_t)msg->data[1];
+		newMsg->pgn = (((uint32_t)msg->data[4]) >> 8);
 		newMsg->prev = currentMsg;
 		newMsg->next = NULL;
 
@@ -901,15 +987,15 @@ void Handle_ISOTransportMessages(uint32_t N2KPgn, uint8_t senderId, uint8_t *dat
 	}
 
 	// Data package
-	if ((N2KPgn & 0x1FF00) == 0x0EB00) {
+	if ((msg->pgn & 0x1FF00) == 0x0EB00) {
 		currentMsg = msgList;
 		// Find the right message
 		while(currentMsg != NULL) {
-			if (currentMsg->senderId == senderId) {
-				offset = data[0] - 1;
-				if ((byteCount = currentMsg->messageSize - (data[0] * 7)) > 7)
+			if (currentMsg->senderId == msg->senderId) {
+				offset = (msg->data[0] - 1) * 7;
+				if ((byteCount = currentMsg->messageSize - (msg->data[0] * 7)) > 7)
 					byteCount = 7;
-				memcpy(currentMsg->data + offset, data, byteCount);
+				memcpy(currentMsg->data + offset, msg->data + 1, byteCount);
 				currentMsg->packetsReceived += 1;
 
 				// Check if message is complete
@@ -934,6 +1020,8 @@ void Handle_ISOTransportMessages(uint32_t N2KPgn, uint8_t senderId, uint8_t *dat
 			}
 		}
 	}
+
+	free(payload);
 }
 
 
@@ -1006,6 +1094,8 @@ void Set_Relays(uint8_t *data)
 struct TIMER_T * Add_Timer(int type, int timeout, void(*callback)(), void * payload) {
 	struct TIMER_T *current, *new;
 
+	// Start atomic function
+	__disable_irq();
 	if ((new = malloc(sizeof(struct TIMER_T))) == NULL)
 		return NULL;
 
@@ -1028,12 +1118,16 @@ struct TIMER_T * Add_Timer(int type, int timeout, void(*callback)(), void * payl
 		new->next = NULL;
 		current->next = new;
 	}
+	__enable_irq();
+	// End atomic function
 
 	return new;;
 }
 
 
 void Delete_Timer(struct TIMER_T *timer) {
+	// Start atomic function
+	__disable_irq();
 	if (timer->prev == NULL)
 		timers = timer->next;
 	else
@@ -1043,12 +1137,16 @@ void Delete_Timer(struct TIMER_T *timer) {
 		timer->next->prev = timer->prev;
 
 	free(timer);
+	__enable_irq();
+	// End atomic function
 }
 
 
 struct JOB_QUEUE_T * Add_Job(void(*callback)(), void * payload) {
 	struct JOB_QUEUE_T *current, *new;
 
+	// Start atomic function
+	__disable_irq();
 	if ((new = malloc(sizeof(struct JOB_QUEUE_T))) == NULL)
 		return NULL;
 
@@ -1064,6 +1162,8 @@ struct JOB_QUEUE_T * Add_Job(void(*callback)(), void * payload) {
 			current = current->next;
 		current->next = new;
 	}
+	__enable_irq();
+	// End atomic function
 
 	return new;
 }
@@ -1071,6 +1171,8 @@ struct JOB_QUEUE_T * Add_Job(void(*callback)(), void * payload) {
 void Delete_Job(struct JOB_QUEUE_T *job) {
 	struct JOB_QUEUE_T *current;
 
+	// Start atomic function
+	__disable_irq();
 	if (jobs == NULL) {}	// Do nothing
 	else if (jobs == job)
 		jobs = job->next;
@@ -1082,6 +1184,8 @@ void Delete_Job(struct JOB_QUEUE_T *job) {
 	}
 
 	free(job);
+	__enable_irq();
+	// End atomic function
 }
 
 

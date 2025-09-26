@@ -10,11 +10,12 @@ For the switching output is use a [12 volt 8 channel relay board from AliExpress
 V1.0 [schematic](NMEA2000%20Relay%20Controller%20V1.0.pdf) added to the repository
 
 ## Compliance
-- Reacts on PGN 59904 - ISO Request messages (only for PGN 60928 and PGN 126996)
+- Reacts on PGN 59904 - ISO Request messages (for all supported PGN's)
 - Sends NMEA2000 PGN 60928 - ISO Address Claim messages to join the bus
 - Reacts on NMEA2000 PGN 60928 - ISO Address Claim messages to resolve address conflicts
 - Reacts on NMEA2000 PGN 127502 - Switch Bank Control messages to switch relays
 - Reacts to request for PGN 126996 Product Information
+- Reacts on request for PGN 126464 PGN List, sends TX list and RX list (2 responces)
 - Reacts to PGN 60160 ISO Transport Protocol DT (for PGN 65240)
 - Reacts to PGN 60416 ISO Transport Protocol CM (BAM announcement for PGN 65240)
 - Reacts to PGN 65240 ISO Commanded Address
@@ -22,15 +23,13 @@ V1.0 [schematic](NMEA2000%20Relay%20Controller%20V1.0.pdf) added to the reposito
 - Broadcasts NMEA2000 PGN 126993 Heartbeat messages
 
 ## Compliance todo (in future release)
-- PGN 59392 ISO Acknowledgment (TX/RX)
-- PGN 59904 ISO Request (RX, for all supported PGN's)
-- PGN 126464 PGN List (TX)
+- PGN 59392 ISO Acknowledgment (TX/RX) (implemented but no use yet)
 - PGN 126998 Configuration Information (TX)
 
 ## Electronics
 See schematic, relay coils ar pulled to earth with a ULN2803 driver. 
 - Operating voltage: 12V (9-16V through NMEA2000 bus)
-- Max coil voltage: 12V
+- Max coil voltage: 12V (NMEA2000 bus voltage)
 - Max current per channel: 500mA
 - Max current total: 2.5A
 ### Safety overrule
@@ -38,7 +37,7 @@ All relays can be activated manually by pulling there control lines to ground wi
 
 ## Links
 [Canboat.github.com](https://canboat.github.io/canboat/canboat.html)\
-[mgenergysystems.eu](https://docs.mgenergysystems.eu/en/application-notes/Tracking-MG-device-on-NMEA2000-CAN-bus#:~:text=Address%20Claim%20procedure%20(ACL),send%20by%20this%20device%20first.)
+[mgenergysystems.eu](https://docs.mgenergysystems.eu/en/application-notes/Tracking-MG-device-on-NMEA2000-CAN-bus#:~:text=Address%20Claim%20procedure%20(ACL),send%20by%20this%20device%20first.)\
 [embeddedflakes.com](https://embeddedflakes.com/network-management-in-sae-j1939/)
 
 ## Disclamer
