@@ -1,4 +1,4 @@
-# NMEA2000-Switch-Device
+# NMEA2000--Relay-Controller
 A remote switch operated bij NMEA2000 PGN 127502 - Switch Bank Control messages
 
 The software is written for and tested on a Blue Pill (stm32f103c8t6)\
