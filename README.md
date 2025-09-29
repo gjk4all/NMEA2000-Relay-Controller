@@ -15,6 +15,7 @@ V1.0 [schematic](NMEA2000%20Relay%20Controller%20V1.0.pdf) added to the reposito
 - Reacts on NMEA2000 PGN 60928 - ISO Address Claim messages to resolve address conflicts
 - Reacts on NMEA2000 PGN 127502 - Switch Bank Control messages to switch relays
 - Reacts to request for PGN 126996 Product Information
+- Reacts to request for PGN 126998 Configuration Information
 - Reacts on request for PGN 126464 PGN List, sends TX list and RX list (2 responces)
 - Reacts to PGN 60160 ISO Transport Protocol DT (for PGN 65240)
 - Reacts to PGN 60416 ISO Transport Protocol CM (BAM announcement for PGN 65240)
@@ -24,7 +25,6 @@ V1.0 [schematic](NMEA2000%20Relay%20Controller%20V1.0.pdf) added to the reposito
 
 ## Compliance todo (in future release)
 - PGN 59392 ISO Acknowledgment (TX/RX) (implemented but no use yet)
-- PGN 126998 Configuration Information (TX)
 
 ## Electronics
 See schematic, relay coils ar pulled to earth with a ULN2803 driver. 
@@ -41,6 +41,7 @@ All relays can be activated manually by pulling there control lines to ground wi
 [embeddedflakes.com](https://embeddedflakes.com/network-management-in-sae-j1939/)
 
 ## Disclamer
-I try my best to make the device as compliance to NMEA2000 as possible bot don't have the means to certify it with NMEA nor to test it on a real NMEA2000 network. Use of this device and the software is at your own risk! (Don't say i didn't warn you).
+I try my best to make the device as compliance to NMEA2000 as possible bot don't have the means to certify it with NMEA nor to test it on a real NMEA2000 network.
+It shows all it's messages as valid in CanBoats N2K analyzer. Use of this device and the software is at your own risk! (Don't say i didn't warn you).
 
 The purpose of this project is to learn how the NMEA2000 protocol operates and to share my experiences with the world. Suggestions for improvement are welcome.

@@ -147,12 +147,13 @@ struct TIMER_T *timers = NULL, *statusTimer;
 struct JOB_QUEUE_T *jobs = NULL;
 
 // List of transmitted and received PGN's capable by this device
-uint32_t txList[] = {59392, 60928, 126996, 127501, 126993, 126464, 0};
+uint32_t txList[] = {59392, 60928, 126996, 126998, 127501, 126993, 126464, 0};
 uint32_t rxList[] = {59904, 60928, 60160, 60416, 65240, 127502, 0};
 uint32_t * pgnList[] = {txList, rxList};
 
-// Static strings for PGN 126996
+// Static strings for PGN 126996 and 126998
 char productInformation[128];
+char manufacturerInformation[] = "(CC) 2025 by G.J.Kruizinga - gjk4all(at)gmail(dot)com";
 
 /* USER CODE END PV */
 
@@ -167,6 +168,7 @@ void Send_ISOAcknowledgement(uint8_t dest, uint8_t control, uint8_t group, uint3
 void Send_HeartBeat(void * payload);
 void Send_Status(void * payload);
 void Send_ProductInformation(void * payload);
+void Send_ConfigurationInformation(void * payload);
 void Send_PGNList(void * payload);
 int Send_FFMessage(CAN_TxHeaderTypeDef *TxHeader, uint8_t *data, int seqNo, int len);
 void Handle_ISOTransportMessages(void *payload);
@@ -634,6 +636,11 @@ void HAL_CAN_RxFifo1MsgPendingCallback(CAN_HandleTypeDef *hcan)
 			Add_Job(&Send_ProductInformation, msg);
 		}
 
+		// Check for a Configuration Information request
+		if (msg->pgn == 0x01F016) {
+			Add_Job(&Send_ConfigurationInformation, msg);
+		}
+
 		// Check for a PGN List request
 		if (msg->pgn == 0x01EE00) {
 			Add_Job(&Send_PGNList, msg);
@@ -754,7 +761,7 @@ void Send_HeartBeat(void * payload) {
 
 	*((uint16_t *)TxData) = nmea2kNetwork.heartbeatTime;
 	TxData[2] = sequence++;
-	TxData[3] = 0b01010011;
+	TxData[3] = 0b11001101;
 	*((uint32_t *)(TxData + 4)) = 0xFFFFFFFF;
 
 	if (sequence > 252)
@@ -851,6 +858,45 @@ void Send_ProductInformation(void * payload) {
 }
 
 
+void Send_ConfigurationInformation(void * payload) {
+	CAN_TxHeaderTypeDef	TxHeader;
+	uint32_t			N2KId;
+	uint8_t				*data;
+
+	// Initialise the CAN header with the NMEA2K info
+	// Can ID = PRIO(3) - 0 - PGN(17) - Sender ID(8)
+	N2KId = (6 << 26) | (0x1F016 << 8) | nmea2kNetwork.senderId;
+	TxHeader.ExtId = N2KId;
+	TxHeader.IDE = CAN_ID_EXT;
+	TxHeader.RTR = CAN_RTR_DATA;
+	TxHeader.DLC = 8;
+	TxHeader.TransmitGlobalTime = DISABLE;
+
+	int mfgStrLength = 2 + strlen(manufacturerInformation);
+	int length = 4 + mfgStrLength;
+
+	// Allocate data structure
+	if ((data = malloc(length * sizeof(uint8_t))) == NULL) {
+		Error_Handler();
+	}
+
+	// Populate data structure
+	data[0] = 2;
+	data[1] = 1;
+	data[2] = 2;
+	data[3] = 1;
+	data[4] = mfgStrLength;
+	data[5] = 1;
+	memcpy(data + 6, manufacturerInformation, strlen(manufacturerInformation));
+
+	// Send as Fast Frame message
+	Send_FFMessage(&TxHeader, data, 0, length);
+
+	free(data);
+	free(payload);
+}
+
+
 void Send_PGNList(void * payload) {
 	CAN_TxHeaderTypeDef	TxHeader;
 	uint32_t			N2KId;
@@ -894,7 +940,7 @@ int Send_FFMessage(CAN_TxHeaderTypeDef *TxHeader, uint8_t *data, int seqNo, int 
 	uint8_t TxData[8];
 
 	// Check validity of len parameter
-	if ((len > 223) || (len < 9))
+	if (len > 223)
 		return frameCounter;
 
 	// Frame length is always 8 data bytes
@@ -906,7 +952,7 @@ int Send_FFMessage(CAN_TxHeaderTypeDef *TxHeader, uint8_t *data, int seqNo, int 
 	memcpy(&TxData[2], data, ((len - offset) < 6)?(len - offset):6);
 
 	// Pad till 8 bytes
-	for (int i = (len - offset) + 1; i < 8; i++) {
+	for (int i = (len - offset) + 2; i < 8; i++) {
 		TxData[i] = 0xFF;
 	}
 
@@ -967,8 +1013,8 @@ void Handle_ISOTransportMessages(void *payload) {
 		newMsg->isoCommand = msg->data[0];
 		newMsg->packetsExpected = msg->data[3];
 		newMsg->packetsReceived = 0;
-		newMsg->messageSize = (uint16_t)msg->data[1];
-		newMsg->pgn = (((uint32_t)msg->data[4]) >> 8);
+		newMsg->messageSize = *((uint16_t *)(msg->data + 1));
+		newMsg->pgn = (*((uint32_t *)(msg->data + 4)) >> 8);
 		newMsg->prev = currentMsg;
 		newMsg->next = NULL;
 
@@ -993,7 +1039,7 @@ void Handle_ISOTransportMessages(void *payload) {
 		while(currentMsg != NULL) {
 			if (currentMsg->senderId == msg->senderId) {
 				offset = (msg->data[0] - 1) * 7;
-				if ((byteCount = currentMsg->messageSize - (msg->data[0] * 7)) > 7)
+				if ((byteCount = currentMsg->messageSize - ((msg->data[0] - 1) * 7)) > 7)
 					byteCount = 7;
 				memcpy(currentMsg->data + offset, msg->data + 1, byteCount);
 				currentMsg->packetsReceived += 1;
