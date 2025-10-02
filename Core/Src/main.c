@@ -6,6 +6,8 @@
   ******************************************************************************
   * NMEA2000 Relay Board Controller
   *
+  * (CC) 2025 by G.J.Kruizinga
+  *
   * @attention
   *
   * Copyright (c) 2025 STMicroelectronics.
@@ -30,13 +32,13 @@
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
 // Bring relay port definitions to an array structure
-struct RELAY {
+struct RELAY_T {
 	GPIO_TypeDef	*gpio;
 	uint16_t		pin;
 };
 
 // NMEA2K network operational NAME parameters
-struct NMEA2K_NETWORK {
+struct NMEA2K_NETWORK_T {
 	uint8_t			senderId;
 	uint8_t			linkState;
 	uint16_t		heartbeatTime;
@@ -45,7 +47,7 @@ struct NMEA2K_NETWORK {
 	uint16_t		statusTime;
 };
 
-struct ISO_TRANSPORT_MESSAGE {
+struct ISO_TRANSPORT_MESSAGE_T {
 	uint8_t			senderId;
 	uint8_t			isoCommand;
 	uint8_t			packetsExpected;
@@ -53,8 +55,8 @@ struct ISO_TRANSPORT_MESSAGE {
 	uint16_t		messageSize;
 	uint32_t		pgn;
 	uint8_t			*data;
-	struct ISO_TRANSPORT_MESSAGE *prev;
-	struct ISO_TRANSPORT_MESSAGE *next;
+	struct ISO_TRANSPORT_MESSAGE_T *prev;
+	struct ISO_TRANSPORT_MESSAGE_T *next;
 };
 
 struct CAN_MSG_T {
@@ -132,7 +134,7 @@ TIM_HandleTypeDef htim3;
 /* USER CODE BEGIN PV */
 volatile uint16_t relayStatus;
 uint8_t relayId;
-struct RELAY relays[RELAY_CHANNELS] = {
+struct RELAY_T relays[RELAY_CHANNELS] = {
 		{relay0_GPIO_Port, relay0_Pin},
 		{relay1_GPIO_Port, relay1_Pin},
 		{relay2_GPIO_Port, relay2_Pin},
@@ -142,7 +144,7 @@ struct RELAY relays[RELAY_CHANNELS] = {
 		{relay6_GPIO_Port, relay6_Pin},
 		{relay7_GPIO_Port, relay7_Pin}
 };
-struct NMEA2K_NETWORK nmea2kNetwork;
+struct NMEA2K_NETWORK_T nmea2kNetwork;
 struct TIMER_T *timers = NULL, *statusTimer;
 struct JOB_QUEUE_T *jobs = NULL;
 
@@ -824,6 +826,16 @@ void Send_Status(void * payload)
 }
 
 
+/******************************************************************************
+ * Send_ProductInformation
+ *
+ * Send a PGN 126996 Product Information message when requested throug a
+ * PGN 59904 - ISO Request message.
+ *
+ * Parameters:
+ *  - *payload		NULL pointer
+ *
+ *****************************************************************************/
 void Send_ProductInformation(void * payload) {
 	CAN_TxHeaderTypeDef	TxHeader;
 	uint32_t			N2KId;
@@ -858,6 +870,16 @@ void Send_ProductInformation(void * payload) {
 }
 
 
+/******************************************************************************
+ * Send_ConfigurationInformation
+ *
+ * Send a PGN 126998 Configuration Information message when requested throug a
+ * PGN 59904 - ISO Request message.
+ *
+ * Parameters:
+ *  - *payload		NULL pointer
+ *
+ *****************************************************************************/
 void Send_ConfigurationInformation(void * payload) {
 	CAN_TxHeaderTypeDef	TxHeader;
 	uint32_t			N2KId;
@@ -897,6 +919,16 @@ void Send_ConfigurationInformation(void * payload) {
 }
 
 
+/******************************************************************************
+ * Send_PGNList
+ *
+ * Sends a  PGN 126464 PGN List for TX and RX messages when requested throug a
+ * PGN 59904 - ISO Request message.
+ *
+ * Parameters:
+ *  - *payload		NULL pointer
+ *
+ *****************************************************************************/
 void Send_PGNList(void * payload) {
 	CAN_TxHeaderTypeDef	TxHeader;
 	uint32_t			N2KId;
@@ -934,6 +966,18 @@ void Send_PGNList(void * payload) {
 }
 
 
+/******************************************************************************
+ * Send_FFMessage
+ *
+ * Sends NMEA2000 Fast Frame messages for the given data structure.
+ *
+ * Parameters:
+ *  - *TxHeader		Pointer to the CAN_TxHeader for the messages
+ *  - *data			Pointer to the data structure
+ *  - seqNo			Sequence number for the FF messages
+ *  - len			Length of the data structure to send
+ *
+ *****************************************************************************/
 int Send_FFMessage(CAN_TxHeaderTypeDef *TxHeader, uint8_t *data, int seqNo, int len) {
 	uint32_t TxMailbox = CAN_TX_MAILBOX0;
 	int offset = 0, frameCounter = 0;
@@ -989,10 +1033,21 @@ int Send_FFMessage(CAN_TxHeaderTypeDef *TxHeader, uint8_t *data, int seqNo, int 
 }
 
 
+/******************************************************************************
+ * Handle_ISOTransportMessages
+ *
+ * Handler for incoming PGN 60416 ISO Transport Protocol CM and PGN 60160 ISO
+ * Transport Protocol DT messages, used for PGN 65240 ISO Commanded Address
+ * messages
+ *
+ * Parameters:
+ *  - *payload		Pointer to an ISO_TRANSPORT_MESSAGE_T structure
+ *
+ *****************************************************************************/
 void Handle_ISOTransportMessages(void *payload) {
 	struct CAN_MSG_T *msg = payload;
-	static struct ISO_TRANSPORT_MESSAGE *msgList = NULL;
-	struct ISO_TRANSPORT_MESSAGE *currentMsg, *newMsg;
+	static struct ISO_TRANSPORT_MESSAGE_T *msgList = NULL;
+	struct ISO_TRANSPORT_MESSAGE_T *currentMsg, *newMsg;
 	int offset, byteCount;
 
 	// BAM announcement
@@ -1004,7 +1059,7 @@ void Handle_ISOTransportMessages(void *payload) {
 		}
 
 		// Create the new message structure
-		if ((newMsg = malloc(sizeof(struct ISO_TRANSPORT_MESSAGE))) == NULL) {
+		if ((newMsg = malloc(sizeof(struct ISO_TRANSPORT_MESSAGE_T))) == NULL) {
 			Error_Handler();
 		}
 
@@ -1071,10 +1126,20 @@ void Handle_ISOTransportMessages(void *payload) {
 }
 
 
+/******************************************************************************
+ * Handle_ISOCommandedAddress
+ *
+ * Handle a received PGN 65240 ISO Commanded Address message if it is adressed
+ * to us
+ *
+ * Parameters:
+ * 	- *data			Pointer to the data structure
+ *
+ *****************************************************************************/
 void Handle_ISOCommandedAddress(uint8_t *data) {
 	if (*(uint64_t *)nmea2kNetwork.nameData == *(uint64_t *)data) {
 		nmea2kNetwork.senderId = data[8];
-		nmea2kNetwork.nameData[7] &= ~(1 << 7);
+		nmea2kNetwork.nameData[7] &= ~(1 << 7);		// Reset arbitrary addres bit
 		nmea2kNetwork.linkState = LINK_STATE_IDLE;
 	}
 }
@@ -1086,14 +1151,10 @@ void Handle_ISOCommandedAddress(uint8_t *data) {
  * Helper function to compare our ISO NAME values against a contender
  *
  * Parameters:
- * 	- *data		Pointer to a CAN RxData[8] structure
+ * 	- *data		Pointer to a CAN RxData[8] NAME structure
  *
  * Returns:
- * 	- (-1)		Our ISO NAME value is greater, reclaim our address
- * 	- (0)		The ISO NAME values are the same, increase deviceInstance and
- * 				reclaim our address (We were first! :-P )
- * 	- (+1)		Our contender has a greater ISO NAME value, we do a modified
- * 				address claim
+ * 	- True if we win, False if we loose
  *
  *****************************************************************************/
 int Compare_NameWeight(uint8_t *data) {
@@ -1137,29 +1198,50 @@ void Set_Relays(uint8_t *data)
 }
 
 
+/******************************************************************************
+ * Add_Timer
+ *
+ * Add a timer to the 10mS time loop. When the timer expires it calls the
+ * *callback function with the *payload as parameter
+ *
+ * Parameters:
+ *  - type			Timer type TIMER_ONESHOT or TIMER_RELOAD
+ *  - timeout		Timeout in steps of 10mS
+ *  - *callback		Function to call a (*callback)(void*) function on timeout
+ *  - *payload		Payload to the function
+ *
+ * Returns:
+ *  - TIMER_T*		Pointer to the created TIMER_T structure or NULL on failure
+ *
+ *****************************************************************************/
 struct TIMER_T * Add_Timer(int type, int timeout, void(*callback)(), void * payload) {
 	struct TIMER_T *current, *new;
 
 	// Start atomic function
 	__disable_irq();
+
+	// Claim the memory for the timer
 	if ((new = malloc(sizeof(struct TIMER_T))) == NULL)
 		return NULL;
 
+	// Populate the timer structure
 	new->type = type;
 	new->timeout = timeout;
 	new->countdown = timeout;
 	new->callback = callback;
 	new->payload = payload;
 
-	if (timers == NULL) {
+	// Add the timer to the queue
+	if (timers == NULL) {	// Empty queue
 		new->prev = NULL;
 		new->next = NULL;
 		timers = new;
 	}
 	else {
 		current = timers;
-		while (current->next != NULL)
+		while (current->next != NULL)	// Find the end of the queue
 			current = current->next;
+		// Add the new timer
 		new->prev = current;
 		new->next = NULL;
 		current->next = new;
@@ -1171,9 +1253,20 @@ struct TIMER_T * Add_Timer(int type, int timeout, void(*callback)(), void * payl
 }
 
 
+/******************************************************************************
+ * Delete_Timer
+ *
+ * Deletes a timer from the 10mS timer loop
+ *
+ * Parameters:
+ *  - *timer		Pointer to the TIMER_T structure to delete
+ *
+ *****************************************************************************/
 void Delete_Timer(struct TIMER_T *timer) {
 	// Start atomic function
 	__disable_irq();
+
+	// Remove the timer from the queue
 	if (timer->prev == NULL)
 		timers = timer->next;
 	else
@@ -1182,31 +1275,50 @@ void Delete_Timer(struct TIMER_T *timer) {
 	if (timer->next != NULL)
 		timer->next->prev = timer->prev;
 
+	// Release the memory from the timer
 	free(timer);
 	__enable_irq();
 	// End atomic function
 }
 
 
+/******************************************************************************
+ * Add_Job
+ *
+ * Adds a job to the job queue to execute outside an interrupt. The job queue is
+ * polled by the main loop.
+ *
+ * Parameters:
+ *  - *callback		Function to call the (*callback)(void*) job function
+ *  - *payload		Payload to the function
+ *
+ * Returns:
+ *  - JOB_QUEUE_T*	Pointer to the job in the queue or NULL on failure
+ *
+ *****************************************************************************/
 struct JOB_QUEUE_T * Add_Job(void(*callback)(), void * payload) {
 	struct JOB_QUEUE_T *current, *new;
 
 	// Start atomic function
 	__disable_irq();
+
+	// Claim memory for the job
 	if ((new = malloc(sizeof(struct JOB_QUEUE_T))) == NULL)
 		return NULL;
 
+	// Populate the job structure
 	new->callback = callback;
 	new->payload = payload;
 	new->next = NULL;
 
-	if (jobs == NULL)
+	// Add the job to the queue
+	if (jobs == NULL)		// Empty queue, job is the first
 		jobs = new;
 	else {
 		current = jobs;
-		while (current->next != NULL)
+		while (current->next != NULL)	// Find the end of the queue
 			current = current->next;
-		current->next = new;
+		current->next = new;			// Add the job at the end
 	}
 	__enable_irq();
 	// End atomic function
@@ -1214,22 +1326,31 @@ struct JOB_QUEUE_T * Add_Job(void(*callback)(), void * payload) {
 	return new;
 }
 
+/******************************************************************************
+ * Delete_Job
+ *
+ * Delete a job from the job queue
+ *
+ * Parameters:
+ *  - *job			Pointer to the job to delete
+ *
+ *****************************************************************************/
 void Delete_Job(struct JOB_QUEUE_T *job) {
 	struct JOB_QUEUE_T *current;
 
 	// Start atomic function
 	__disable_irq();
 	if (jobs == NULL) {}	// Do nothing
-	else if (jobs == job)
-		jobs = job->next;
+	else if (jobs == job)	// Found the right job
+		jobs = job->next;	// Remove the job from the queue
 	else {
 		current = jobs;
-		while (current->next != job)
+		while (current->next != job)	// Scan the queue for the job
 			current = current->next;
-		current->next = job->next;
+		current->next = job->next;		// Remove the job from the queue
 	}
 
-	free(job);
+	free(job);				// Release the memory from the job
 	__enable_irq();
 	// End atomic function
 }
